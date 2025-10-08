@@ -1,0 +1,228 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Mini Platformer</title>
+    <style>
+        html,body { height:100%; margin:0; background:#111; display:flex; align-items:center; justify-content:center; }
+        canvas { background:#87ceeb; image-rendering:crisp-edges; }
+        #info { position:fixed; top:8px; left:8px; color:#fff; font-family:system-ui,Segoe UI,Roboto; }
+    </style>
+</head>
+<body>
+<div id="info">Arrows / A D to move, Z / W / Space to jump</div>
+<canvas id="game" width="800" height="480"></canvas>
+<script>
+/* Simple platformer in one file */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const W = canvas.width, H = canvas.height;
+
+const keys = {};
+addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; e.preventDefault(); });
+addEventListener('keyup',   e => { keys[e.key.toLowerCase()] = false; });
+
+const player = {
+    x: 40, y: 360, w: 28, h: 42,
+    vx: 0, vy: 0,
+    speed: 3.2,
+    jumpStrength: 10,
+    grounded: false,
+    color: '#ffcc00'
+};
+
+// simple level: platforms are {x,y,w,h}
+const platforms = [
+    {x:0,   y:420, w:800, h:60},       // ground
+    {x:120, y:330, w:120, h:16},
+    {x:300, y:270, w:140, h:16},
+    {x:500, y:220, w:120, h:16},
+    {x:650, y:150, w:120, h:16},
+    {x:380, y:380, w:90,  h:16}
+];
+
+const goal = { x: 700, y: 90, w: 56, h: 56, color:'#4caf50' };
+
+const GRAV = 0.5;
+const FRICTION = 0.88;
+const MAX_FALL = 18;
+
+function rectsOverlap(a,b){
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function resolvePlatformCollision(p, plat){
+    // simple AABB collision resolution
+    const prevX = p.x - p.vx;
+    const prevY = p.y - p.vy;
+
+    // determine where collision happened using previous position
+    const fromLeft  = prevX + p.w <= plat.x;
+    const fromRight = prevX >= plat.x + plat.w;
+    const fromTop   = prevY + p.h <= plat.y;
+    const fromBottom= prevY >= plat.y + plat.h;
+
+    // prefer vertical resolution if coming from top or bottom
+    if (fromTop || (!fromLeft && !fromRight)) {
+        // land on top
+        if (p.y + p.h > plat.y && prevY + p.h <= plat.y) {
+            p.y = plat.y - p.h;
+            p.vy = 0;
+            p.grounded = true;
+            return;
+        }
+    }
+    if (fromBottom) {
+        // hit head
+        if (p.y < plat.y + plat.h && prevY >= plat.y + plat.h) {
+            p.y = plat.y + plat.h;
+            p.vy = 0;
+            return;
+        }
+    }
+    // horizontal push
+    if (fromLeft) {
+        p.x = plat.x - p.w;
+        p.vx = 0;
+    } else if (fromRight) {
+        p.x = plat.x + plat.w;
+        p.vx = 0;
+    }
+}
+
+function update(){
+    // input
+    const left  = keys['arrowleft'] || keys['a'];
+    const right = keys['arrowright'] || keys['d'];
+    const jump  = keys[' '] || keys['z'] || keys['w'] || keys['arrowup'];
+
+    if (left)  player.vx = Math.max(player.vx - 0.8, -player.speed*1.6);
+    if (right) player.vx = Math.min(player.vx + 0.8,  player.speed*1.6);
+    if (!left && !right) player.vx *= FRICTION;
+
+    // jump (only if grounded)
+    if (jump && player.grounded) {
+        player.vy = -player.jumpStrength;
+        player.grounded = false;
+    }
+
+    // apply gravity
+    player.vy = Math.min(player.vy + GRAV, MAX_FALL);
+
+    // integrate
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // world bounds
+    if (player.x < -50) player.x = -50;
+    if (player.x + player.w > W + 50) player.x = W + 50 - player.w;
+    if (player.y > H + 200) reset();
+
+    // collisions
+    player.grounded = false;
+    for (const plat of platforms) {
+        if (rectsOverlap(player, plat)) {
+            resolvePlatformCollision(player, plat);
+        }
+    }
+
+    // goal check
+    if (rectsOverlap(player, goal)) {
+        // simple win: reset with message flash
+        flash('You win! Resetting...');
+        reset();
+    }
+}
+
+let flashTimer = 0;
+function flash(text){
+    flashTimer = 120;
+    flashText = text;
+}
+let flashText = '';
+
+function reset(){
+    player.x = 40; player.y = 360;
+    player.vx = 0; player.vy = 0;
+}
+
+function drawRoundedRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+    ctx.fill();
+}
+
+function draw(){
+    // clear
+    ctx.clearRect(0,0,W,H);
+
+    // background: simple gradient sky
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#87ceeb'); g.addColorStop(1,'#b0e0e6');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+
+    // platforms
+    for (const p of platforms) {
+        ctx.fillStyle = '#6b4f2f';
+        drawRoundedRect(p.x, p.y, p.w, p.h, 6);
+        // highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fillRect(p.x+6, p.y+3, p.w-12, 6);
+    }
+
+    // goal
+    ctx.fillStyle = goal.color;
+    drawRoundedRect(goal.x, goal.y, goal.w, goal.h, 8);
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🏁', goal.x + goal.w/2, goal.y + goal.h/2 + 8);
+
+    // player shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(player.x+player.w/2, player.y+player.h+6, player.w/2+2, 6, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // player
+    ctx.fillStyle = player.color;
+    drawRoundedRect(player.x, player.y, player.w, player.h, 6);
+    // simple eye
+    ctx.fillStyle = '#222';
+    ctx.fillRect(player.x + player.w/2 + 2, player.y + 10, 6, 6);
+
+    // HUD
+    ctx.fillStyle = '#ffffffcc';
+    ctx.font = '14px system-ui,Segoe UI,Roboto';
+    ctx.textAlign = 'left';
+    ctx.fillText('Position: ' + Math.round(player.x) + ',' + Math.round(player.y), 8, 18);
+
+    if (flashTimer > 0) {
+        ctx.fillStyle = '#0008';
+        ctx.fillRect(0, H/2 - 30, W, 60);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = '22px sans-serif';
+        ctx.fillText(flashText, W/2, H/2 + 8);
+        flashTimer--;
+    }
+}
+
+function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+reset();
+loop();
+</script>
+</body>
+</html>
